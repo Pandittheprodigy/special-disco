@@ -56,11 +56,10 @@ def render_agent_config(agent_label, key_prefix):
             default_model = "llama-3.3-70b-versatile"
         elif provider == "OpenRouter": 
             default_model = "meta-llama/llama-3.3-70b-instruct:free"
-        else:
+        else
             # Default for Google Gemini or any other selection
             #default_model = "gemini-2.0-flash"
-        
-        model_name = st.text_input("Model Name", value=default_model, key=f"{key_prefix}_m")
+            model_name = st.text_input("Model Name", value=default_model, key=f"{key_prefix}_m")
         return provider, api_key, model_name
 with st.sidebar:
     st.header("🔐 Access Credentials")

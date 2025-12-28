@@ -7,3 +7,4 @@ Litellm
 crewai[google-genai]
 pydantic
 duckduckgo-search
+langchain_community

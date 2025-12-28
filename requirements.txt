@@ -4,3 +4,4 @@ langchain_openai
 streamlit 
 python-pptx
 Litellm
+crewai[google-genai]

@@ -127,8 +127,8 @@ if st.button("🚀 Start Publication Flow"):
             # Agents & Tasks
             researcher = Agent(role='Researcher', goal=f'Deep dive into {topic}', backstory="Harvard Prof.", llm=llm_res, verbose=True)
             writer = Agent(role='Writer', goal='Create academic paper.', backstory="Journal Editor.", llm=llm_wri, verbose=True)
-            presenter = Agent(role='Presenter', goal='Create PPT structure.', tools=[PowerPointCreatorTool()], llm=llm_pre, verbose=True)
-
+            # ✅ FIXED: Explicitly added backstory
+            presenter = Agent(role='Presentation Expert', goal='Convert paper into a JSON structure for PowerPoint.', backstory='You are a world-class visual storyteller and slide designer for Harvard professors.', tools=[PowerPointCreatorTool()], llm=llm_pre,verbose=True)
             t1 = Task(description=f"Research {topic}.", expected_output="Summary.", agent=researcher)
             t2 = Task(description="Write paper.", expected_output="Paper.", agent=writer, context=[t1])
             t3 = Task(description="Create PPT.", expected_output="Confirmation.", agent=presenter, context=[t2])

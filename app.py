@@ -3,16 +3,19 @@ import os
 import json
 import sys
 import io
+import logging
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai.tools import BaseTool
+from langchain_community.tools import DuckDuckGoSearchRun # Search Tool
 from pptx import Presentation
 
 # ==========================
-# 1. UI & LOGGING SETUP
+# 1. UI & LOGGING SUPPRESSION
 # ==========================
+logging.getLogger('streamlit.runtime.scriptrunner_utils.script_run_context').setLevel(logging.ERROR)
+
 st.set_page_config(page_title="Harvard Publication Crew Pro", layout="wide")
 
-# Custom CSS for the log window
 st.markdown("""
     <style>
     .log-container {
@@ -21,14 +24,15 @@ st.markdown("""
         padding: 10px;
         border-radius: 5px;
         font-family: 'Courier New', Courier, monospace;
-        height: 300px;
+        height: 350px;
         overflow-y: scroll;
-        font-size: 0.8rem;
+        font-size: 0.85rem;
+        border: 1px solid #444;
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🎓 Harvard Research Crew (With Live Logs)")
+st.title("🎓 Harvard Research Crew (Real-Time 2025)")
 
 # --- Sidebar: Load Balancing ---
 def render_agent_config(agent_label, key_prefix):
@@ -36,7 +40,7 @@ def render_agent_config(agent_label, key_prefix):
         provider = st.selectbox("Provider", ["Google Gemini", "Groq", "OpenRouter"], key=f"{key_prefix}_p")
         api_key = st.text_input("API Key", type="password", key=f"{key_prefix}_k")
         
-        default_model = "gemini-2.5-flash"
+        default_model = "gemini-2.0-flash" 
         if provider == "Groq": default_model = "llama-3.3-70b-versatile"
         elif provider == "OpenRouter": default_model = "meta-llama/llama-3.3-70b-instruct:free"
         
@@ -52,6 +56,15 @@ with st.sidebar:
 # ==========================
 # 2. TOOLS & LLM FACTORY
 # ==========================
+
+# Custom Web Search Tool Wrapper
+class WebSearchTool(BaseTool):
+    name: str = "Web Search"
+    description: str = "Search the internet for real-time 2025 data, news, and academic trends."
+
+    def _run(self, query: str) -> str:
+        search = DuckDuckGoSearchRun()
+        return search.run(query)
 
 class PowerPointCreatorTool(BaseTool):
     name: str = "Create PowerPoint"
@@ -74,8 +87,9 @@ class PowerPointCreatorTool(BaseTool):
                         p = tf.add_paragraph()
                         p.text = str(point)
             
-            prs.save("harvard_output.pptx")
-            return "SUCCESS: File 'harvard_output.pptx' created."
+            output_path = "harvard_output.pptx"
+            prs.save(output_path)
+            return f"SUCCESS: File '{output_path}' created."
         except Exception as e:
             return f"Error: {str(e)}"
 
@@ -90,59 +104,73 @@ def create_crew_llm(config_tuple):
 # 3. MAIN APP LOGIC
 # ==========================
 
-topic = st.text_area("Research Topic", placeholder="Enter your academic query...")
+topic = st.text_area("Research Topic", placeholder="e.g., Global Economic Trends in Q4 2025...")
 
-if st.button("🚀 Start Publication Flow"):
+if st.button("🚀 Start Search & Publication Flow"):
     llm_res = create_crew_llm(res_config)
     llm_wri = create_crew_llm(wri_config)
     llm_pre = create_crew_llm(pre_config)
 
     if not (llm_res and llm_wri and llm_pre):
-        st.error("Missing configuration in the sidebar.")
+        st.error("Please ensure all API keys are provided.")
     else:
-        # 🟢 Create the Log Window
         st.subheader("🕵️ Agent Thought Process (Live Logs)")
         log_window = st.empty()
-        log_output = io.StringIO()
-
-        # Custom class to capture stdout and update streamlit
+        
         class StreamToStreamlit:
-            def __init__(self, storage, display):
-                self.storage = storage
+            def __init__(self, display):
                 self.display = display
                 self.buffer = ""
 
             def write(self, data):
                 self.buffer += data
-                # Update the UI
                 self.display.markdown(f'<div class="log-container">{self.buffer.replace("\n", "<br>")}</div>', unsafe_allow_html=True)
             
             def flush(self):
                 pass
 
-        # Redirect stdout
-        sys.stdout = StreamToStreamlit(log_output, log_window)
+        sys.stdout = StreamToStreamlit(log_window)
 
         try:
-            # Agents & Tasks
-            researcher = Agent(role='Researcher', goal=f'Deep dive into {topic}', backstory="Harvard Prof.", llm=llm_res, verbose=True)
-            writer = Agent(role='Writer', goal='Create academic paper.', backstory="Journal Editor.", llm=llm_wri, verbose=True)
-            # ✅ FIXED: Explicitly added backstory
-            presenter = Agent(role='Presentation Expert', goal='Convert paper into a JSON structure for PowerPoint.', backstory='You are a world-class visual storyteller and slide designer for Harvard professors.', tools=[PowerPointCreatorTool()], llm=llm_pre,verbose=True)
-            t1 = Task(description=f"Research {topic}.", expected_output="Summary.", agent=researcher)
-            t2 = Task(description="Write paper.", expected_output="Paper.", agent=writer, context=[t1])
-            t3 = Task(description="Create PPT.", expected_output="Confirmation.", agent=presenter, context=[t2])
+            # --- Agents ---
+            researcher = Agent(
+                role='Principal Researcher', 
+                goal=f'Use web search to find the latest 2025 data on {topic}', 
+                backstory="You are a data-driven Harvard researcher with live access to the web. You provide actual links and citations.", 
+                tools=[WebSearchTool()], # Added Search Tool
+                llm=llm_res, 
+                verbose=True
+            )
+            
+            writer = Agent(
+                role='Lead Academic Writer', 
+                goal='Synthesize the searched data into a formal paper.', 
+                backstory="You are a chief editor who transforms raw web data into scholarly articles.", 
+                llm=llm_wri, 
+                verbose=True
+            )
+            
+            presenter = Agent(
+                role='Presentation Specialist', 
+                goal='Create a PowerPoint deck from the final paper.', 
+                backstory='You design presentations for high-stakes academic conferences.', 
+                tools=[PowerPointCreatorTool()], 
+                llm=llm_pre,
+                verbose=True
+            )
+
+            # --- Tasks ---
+            t1 = Task(description=f"Search for and synthesize the latest 2025 information on {topic}.", expected_output="A research report with real-world citations.", agent=researcher)
+            t2 = Task(description="Write a Harvard-style paper based on the research report.", expected_output="A full markdown paper.", agent=writer, context=[t1])
+            t3 = Task(description="Generate a 7-slide PPT deck using the tool.", expected_output="Confirmation of PPTX creation.", agent=presenter, context=[t2])
 
             crew = Crew(agents=[researcher, writer, presenter], tasks=[t1, t2, t3], process=Process.sequential)
             
             final_result = crew.kickoff()
-
-            # Restore stdout
             sys.stdout = sys.__stdout__
 
-            st.success("✅ Workflow Complete!")
+            st.success("✅ Research & Publication Complete!")
             
-            # Show Results
             tab1, tab2 = st.tabs(["📄 Final Paper", "📥 Downloads"])
             with tab1:
                 st.markdown(t2.output.raw)

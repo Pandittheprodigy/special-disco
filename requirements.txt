@@ -9,3 +9,4 @@ pydantic
 duckduckgo-search
 langchain_community
 fastapi
+ddgs

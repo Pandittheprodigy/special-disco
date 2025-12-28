@@ -10,3 +10,4 @@ duckduckgo-search
 langchain_community
 fastapi
 ddgs
+apscheduler

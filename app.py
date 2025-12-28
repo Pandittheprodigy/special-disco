@@ -51,17 +51,32 @@ def render_agent_config(agent_label, key_prefix):
         provider = st.selectbox("Provider", ["Google Gemini", "Groq", "OpenRouter"], key=f"{key_prefix}_p")
         api_key = st.text_input("API Key", type="password", key=f"{key_prefix}_k")
 
-        # Set appropriate default models for each provider
+        # Set appropriate default models and options for each provider
         if provider == "Google Gemini":
             default_model = "gemini-2.0-flash"
+            model_options = ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-flash"]
         elif provider == "Groq":
             default_model = "llama-3.3-70b-versatile"
+            model_options = ["llama-3.3-70b-versatile", "llama-3.3-8b-versatile", "mixtral-8x7b-32768"]
         elif provider == "OpenRouter":
             default_model = "meta-llama/llama-3.3-70b-instruct:free"
+            model_options = [
+                "meta-llama/llama-3.3-70b-instruct:free",
+                "meta-llama/llama-3.3-8b-instruct:free",
+                "mistralai/mistral-7b-instruct:free"
+            ]
         else:
-            default_model = "gemini-2.0-flash"  # Fallback default
+            default_model = "gemini-2.0-flash"
+            model_options = ["gemini-2.0-flash"]
 
-        model_name = st.text_input("Model Name", value=default_model, key=f"{key_prefix}_m")
+        # Use selectbox instead of text_input for better UX
+        model_name = st.selectbox(
+            "Model Name",
+            options=model_options,
+            index=0,  # Select first option by default
+            key=f"{key_prefix}_m"
+        )
+
         return provider, api_key, model_name
 
 with st.sidebar:
@@ -70,6 +85,7 @@ with st.sidebar:
     res_config = render_agent_config("Quantitative Researcher", "res")
     wri_config = render_agent_config("Lead Academic Editor", "wri")
     pre_config = render_agent_config("Presentation Principal", "pre")
+    
 # ==========================
 # 3. ADVANCED ACADEMIC TOOLS
 # ==========================

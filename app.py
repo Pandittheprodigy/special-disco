@@ -53,8 +53,8 @@ def render_agent_config(agent_label, key_prefix):
 
         # Set appropriate default models and options for each provider
         if provider == "Google Gemini":
-            default_model = "gemini-2.0-flash"
-            model_options = ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-flash"]
+            default_model = "gemini-2.5-flash"
+            model_options = ["gemini-2.5-flash", "gemini-2.0-pro", "gemini-1.5-flash"]
         elif provider == "Groq":
             default_model = "llama-3.3-70b-versatile"
             model_options = ["llama-3.3-70b-versatile", "llama-3.3-8b-versatile", "mixtral-8x7b-32768"]

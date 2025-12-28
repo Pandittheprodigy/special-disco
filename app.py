@@ -51,13 +51,17 @@ def render_agent_config(agent_label, key_prefix):
         provider = st.selectbox("Provider", ["Google Gemini", "Groq", "OpenRouter"], key=f"{key_prefix}_p")
         api_key = st.text_input("API Key", type="password", key=f"{key_prefix}_k")
         
-         
-        if provider == "Groq": default_model = "llama-3.3-70b-versatile"
-        elif provider == "OpenRouter": default_model = "meta-llama/llama-3.3-70b-instruct:free"
-        default_model = "gemini-2.0-flash"
+        # Logic Fix: Define the default BEFORE or INSIDE the conditional checks
+        if provider == "Groq": 
+            default_model = "llama-3.3-70b-versatile"
+        elif provider == "OpenRouter": 
+            default_model = "meta-llama/llama-3.3-70b-instruct:free"
+        else:
+            # Default for Google Gemini or any other selection
+            default_model = "gemini-2.0-flash"
+        
         model_name = st.text_input("Model Name", value=default_model, key=f"{key_prefix}_m")
         return provider, api_key, model_name
-
 with st.sidebar:
     st.header("🔐 Access Credentials")
     st.info("Utilize high-parameter models (e.g., Llama 3.3 70B or Gemini Pro) for best academic results.")

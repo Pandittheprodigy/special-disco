@@ -1,253 +1,156 @@
 import streamlit as st
 import os
-from crewai import Agent, Task, Crew, Process
-from crewai.tools import BaseTool
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
-from pptx import Presentation
-from pptx.util import Inches, Pt
-from pydantic import BaseModel, Field
-from typing import List, Type
 import json
+import sys
+import io
+from crewai import Agent, Task, Crew, Process, LLM
+from crewai.tools import BaseTool
+from pptx import Presentation
 
 # ==========================
-# 1. UI & CONFIGURATION
+# 1. UI & LOGGING SETUP
 # ==========================
-st.set_page_config(page_title="Harvard Research & Presentation Crew", layout="wide")
+st.set_page_config(page_title="Harvard Publication Crew Pro", layout="wide")
 
-st.title("🎓 Harvard Research & Publication Crew")
+# Custom CSS for the log window
 st.markdown("""
-This crew consists of elite researchers and a presentation expert. 
-They will research a topic to Harvard standards, write a paper, and generate a downloadable PowerPoint presentation.
-""")
+    <style>
+    .log-container {
+        background-color: #1e1e1e;
+        color: #00ff00;
+        padding: 10px;
+        border-radius: 5px;
+        font-family: 'Courier New', Courier, monospace;
+        height: 300px;
+        overflow-y: scroll;
+        font-size: 0.8rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# Sidebar for API Configuration
+st.title("🎓 Harvard Research Crew (With Live Logs)")
+
+# --- Sidebar: Load Balancing ---
+def render_agent_config(agent_label, key_prefix):
+    with st.sidebar.expander(f"⚙️ {agent_label}", expanded=False):
+        provider = st.selectbox("Provider", ["Google Gemini", "Groq", "OpenRouter"], key=f"{key_prefix}_p")
+        api_key = st.text_input("API Key", type="password", key=f"{key_prefix}_k")
+        
+        default_model = "gemini-1.5-pro"
+        if provider == "Groq": default_model = "llama3-70b-8192"
+        elif provider == "OpenRouter": default_model = "openai/gpt-4o"
+        
+        model_name = st.text_input("Model Name", value=default_model, key=f"{key_prefix}_m")
+        return provider, api_key, model_name
+
 with st.sidebar:
-    st.header("⚙️ LLM Configuration")
-    provider = st.selectbox("Select LLM Provider", ["Google Gemini", "Groq", "OpenRouter"])
-    
-    api_key = st.text_input(f"Enter {provider} API Key", type="password")
-    
-    model_name = ""
-    if provider == "Google Gemini":
-        model_name = st.text_input("Model Name", value="gemini-1.5-pro")
-    elif provider == "Groq":
-        model_name = st.text_input("Model Name", value="llama3-70b-8192")
-    elif provider == "OpenRouter":
-        model_name = st.text_input("Model Name", value="openai/gpt-4o")
+    st.header("🔑 Multi-Key Config")
+    res_config = render_agent_config("Researcher (Key 1)", "res")
+    wri_config = render_agent_config("Writer (Key 2)", "wri")
+    pre_config = render_agent_config("Presenter (Key 3)", "pre")
 
 # ==========================
-# 2. CUSTOM TOOLS (PowerPoint)
+# 2. TOOLS & LLM FACTORY
 # ==========================
-
-class SlideData(BaseModel):
-    title: str
-    content: List[str]
-
-class PresentationData(BaseModel):
-    slides: List[SlideData]
 
 class PowerPointCreatorTool(BaseTool):
     name: str = "Create PowerPoint"
-    description: str = (
-        "Useful for creating a physical PowerPoint file. "
-        "Accepts a JSON string representing the slides structure. "
-        "The JSON must follow this format: "
-        "{'slides': [{'title': 'Slide 1 Title', 'content': ['Bullet 1', 'Bullet 2']}, ...]}"
-    )
+    description: str = "Creates a .pptx file from JSON input."
 
     def _run(self, slides_json: str) -> str:
         try:
-            # Clean json string if it contains markdown code blocks
             clean_json = slides_json.replace("```json", "").replace("```", "").strip()
-            data = json.loads(clean_json)
+            start = clean_json.find('{')
+            end = clean_json.rfind('}') + 1
+            data = json.loads(clean_json[start:end])
             
             prs = Presentation()
-            
             for slide_info in data.get('slides', []):
-                slide_layout = prs.slide_layouts[1] # Bullet slide
-                slide = prs.slides.add_slide(slide_layout)
-                
-                # Set Title
-                title = slide.shapes.title
-                title.text = slide_info.get('title', 'No Title')
-                
-                # Set Content
-                content_placeholder = slide.placeholders[1]
-                tf = content_placeholder.text_frame
-                
-                points = slide_info.get('content', [])
-                if points:
-                    tf.text = points[0]
-                    for point in points[1:]:
+                slide = prs.slides.add_slide(prs.slide_layouts[1])
+                slide.shapes.title.text = slide_info.get('title', 'Harvard Research')
+                if len(slide.placeholders) > 1:
+                    tf = slide.placeholders[1].text_frame
+                    for point in slide_info.get('content', []):
                         p = tf.add_paragraph()
-                        p.text = point
-                        p.level = 0
+                        p.text = str(point)
             
-            filename = "harvard_research_presentation.pptx"
-            prs.save(filename)
-            return f"Successfully created presentation: {filename}"
-            
+            prs.save("harvard_output.pptx")
+            return "SUCCESS: File 'harvard_output.pptx' created."
         except Exception as e:
-            return f"Error creating presentation: {str(e)}"
+            return f"Error: {str(e)}"
+
+def create_crew_llm(config_tuple):
+    provider, api_key, model_name = config_tuple
+    if not api_key: return None
+    prefix_map = {"Google Gemini": "gemini/", "Groq": "groq/", "OpenRouter": "openrouter/"}
+    full_model = f"{prefix_map.get(provider, '')}{model_name}"
+    return LLM(model=full_model, api_key=api_key, temperature=0.3)
 
 # ==========================
-# 3. LLM FACTORY
-# ==========================
-def get_llm(provider, api_key, model_name):
-    if not api_key:
-        return None
-    
-    if provider == "Google Gemini":
-        return ChatGoogleGenerativeAI(
-            model=model_name,
-            verbose=True,
-            temperature=0.5,
-            google_api_key=api_key
-        )
-    elif provider == "Groq":
-        return ChatOpenAI(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=api_key,
-            model=model_name,
-            temperature=0.5
-        )
-    elif provider == "OpenRouter":
-        return ChatOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key,
-            model=model_name,
-            temperature=0.5
-        )
-    return None
-
-# ==========================
-# 4. CREW EXECUTION
+# 3. MAIN APP LOGIC
 # ==========================
 
-topic = st.text_area("Enter Research Topic:", placeholder="e.g., The Impact of Quantum Computing on Cryptography")
+topic = st.text_area("Research Topic", placeholder="Enter your academic query...")
 
-if st.button("🚀 Launch Research Crew"):
-    if not api_key or not topic:
-        st.error("Please provide both an API Key and a Topic.")
+if st.button("🚀 Start Publication Flow"):
+    llm_res = create_crew_llm(res_config)
+    llm_wri = create_crew_llm(wri_config)
+    llm_pre = create_crew_llm(pre_config)
+
+    if not (llm_res and llm_wri and llm_pre):
+        st.error("Missing configuration in the sidebar.")
     else:
-        llm = get_llm(provider, api_key, model_name)
-        
-        if llm:
-            with st.spinner('Initializing Agents...'):
-                
-                # --- Agents ---
-                
-                # 1. Lead Researcher
-                researcher = Agent(
-                    role='Senior Harvard Researcher',
-                    goal='Conduct rigorous, academic analysis on the given topic.',
-                    backstory=(
-                        "You are a distinguished professor at Harvard. "
-                        "You prioritize empirical data, peer-reviewed sources, and critical analysis. "
-                        "You despise fluff and demand intellectual depth."
-                    ),
-                    allow_delegation=False,
-                    verbose=True,
-                    llm=llm
-                )
+        # 🟢 Create the Log Window
+        st.subheader("🕵️ Agent Thought Process (Live Logs)")
+        log_window = st.empty()
+        log_output = io.StringIO()
 
-                # 2. Academic Writer
-                writer = Agent(
-                    role='Academic Publication Editor',
-                    goal='Synthesize research into a Harvard Business Review style article.',
-                    backstory=(
-                        "You are a strict editor for top-tier academic journals. "
-                        "You ensure clarity, coherence, and perfect academic tone. "
-                        "You structure arguments logically."
-                    ),
-                    allow_delegation=False,
-                    verbose=True,
-                    llm=llm
-                )
+        # Custom class to capture stdout and update streamlit
+        class StreamToStreamlit:
+            def __init__(self, storage, display):
+                self.storage = storage
+                self.display = display
+                self.buffer = ""
 
-                # 3. Presentation Expert
-                ppt_expert = Agent(
-                    role='Visual Communication Specialist',
-                    goal='Convert the academic paper into a high-impact PowerPoint presentation file.',
-                    backstory=(
-                        "You are a visual storytelling expert used by Fortune 500 CEOs and Academic Deans. "
-                        "You know how to distill complex text into punchy slides. "
-                        "You MUST use the 'Create PowerPoint' tool to generate the actual file."
-                    ),
-                    tools=[PowerPointCreatorTool()],
-                    allow_delegation=False,
-                    verbose=True,
-                    llm=llm
-                )
+            def write(self, data):
+                self.buffer += data
+                # Update the UI
+                self.display.markdown(f'<div class="log-container">{self.buffer.replace("\n", "<br>")}</div>', unsafe_allow_html=True)
+            
+            def flush(self):
+                pass
 
-                # --- Tasks ---
+        # Redirect stdout
+        sys.stdout = StreamToStreamlit(log_output, log_window)
 
-                task_research = Task(
-                    description=f"Conduct a deep dive research on: '{topic}'. Identify key trends, data points, and academic perspectives.",
-                    expected_output="A detailed research summary including 5 key findings and citations.",
-                    agent=researcher
-                )
+        try:
+            # Agents & Tasks
+            researcher = Agent(role='Researcher', goal=f'Deep dive into {topic}', backstory="Harvard Prof.", llm=llm_res, verbose=True)
+            writer = Agent(role='Writer', goal='Create academic paper.', backstory="Journal Editor.", llm=llm_wri, verbose=True)
+            presenter = Agent(role='Presenter', goal='Create PPT structure.', tools=[PowerPointCreatorTool()], llm=llm_pre, verbose=True)
 
-                task_write = Task(
-                    description="Write a comprehensive academic article based on the research findings. Structure it with an Abstract, Introduction, Body, and Conclusion.",
-                    expected_output="A full markdown-formatted academic paper.",
-                    agent=writer,
-                    context=[task_research]
-                )
+            t1 = Task(description=f"Research {topic}.", expected_output="Summary.", agent=researcher)
+            t2 = Task(description="Write paper.", expected_output="Paper.", agent=writer, context=[t1])
+            t3 = Task(description="Create PPT.", expected_output="Confirmation.", agent=presenter, context=[t2])
 
-                task_presentation = Task(
-                    description=(
-                        "Create a PowerPoint presentation based on the written article. "
-                        "1. Extract the main points. "
-                        "2. Create a JSON structure for 5-7 slides. "
-                        "3. USE the 'Create PowerPoint' tool to save the file."
-                    ),
-                    expected_output="A confirmation that the .pptx file has been created.",
-                    agent=ppt_expert,
-                    context=[task_write]
-                )
+            crew = Crew(agents=[researcher, writer, presenter], tasks=[t1, t2, t3], process=Process.sequential)
+            
+            final_result = crew.kickoff()
 
-                # --- Crew ---
-                crew = Crew(
-                    agents=[researcher, writer, ppt_expert],
-                    tasks=[task_research, task_write, task_presentation],
-                    process=Process.sequential,
-                    verbose=True
-                )
+            # Restore stdout
+            sys.stdout = sys.__stdout__
 
-            with st.spinner('Researching, Writing & Designing (This may take a moment)...'):
-                result = crew.kickoff()
-
-            # --- Results Display ---
             st.success("✅ Workflow Complete!")
+            
+            # Show Results
+            tab1, tab2 = st.tabs(["📄 Final Paper", "📥 Downloads"])
+            with tab1:
+                st.markdown(t2.output.raw)
+            with tab2:
+                if os.path.exists("harvard_output.pptx"):
+                    with open("harvard_output.pptx", "rb") as f:
+                        st.download_button("Download PowerPoint", f, "presentation.pptx")
 
-            col1, col2 = st.columns([2, 1])
-
-            with col1:
-                st.subheader("📄 Academic Paper")
-                st.markdown(task_write.output.raw)
-
-            with col2:
-                st.subheader("📊 Presentation")
-                st.info(f"Presentation Task Output: {task_presentation.output.raw}")
-                
-                # Check if file exists and offer download
-                ppt_file = "harvard_research_presentation.pptx"
-                if os.path.exists(ppt_file):
-                    with open(ppt_file, "rb") as file:
-                        btn = st.download_button(
-                            label="📥 Download PowerPoint (.pptx)",
-                            data=file,
-                            file_name="Harvard_Research.pptx",
-                            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                        )
-                else:
-                    st.warning("The presentation file was not found. Check the logs.")
-
-        else:
-            st.error("Failed to initialize LLM. Check your settings.")
-
-# Clean up / Footer
-st.sidebar.markdown("---")
-st.sidebar.caption("Powered by CrewAI & Streamlit")
+        except Exception as e:
+            sys.stdout = sys.__stdout__
+            st.error(f"Execution Error: {str(e)}")
